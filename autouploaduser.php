@@ -24,7 +24,7 @@
  * @copyright  2004 onwards Martin Dougiamas (http://dougiamas.com)
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  * Note: Based on /admin/tool/uploaduser by Martin Dougiamas.
- * Note: Based on autouploaduser.php by Brian Pool.
+ *       and autouploaduser.php by Brian Pool.
  * Compatibility: Moodle 3.1+ (tested on 3.4).
  */
 
@@ -39,43 +39,50 @@ require_once($CFG->dirroot.'/cohort/lib.php');
 require_once($CFG->dirroot.'/admin/tool/uploaduser/locallib.php');
 // require_once('user_form.php');
 
-$iid         = optional_param('iid', '', PARAM_INT);
+$iid = optional_param('iid', '', PARAM_INT);
 //$previewrows = optional_param('previewrows', 10, PARAM_INT);
 
-core_php_time_limit::raise(60*60); // 1 hour should be enough
+core_php_time_limit::raise(14400); // 4 hours should be enough.
 raise_memory_limit(MEMORY_HUGE);
+
+// Emulate normal session.
+cron_setup_user();
 
 //
 // No logon required since this is called from a cron job and does nothing but import the user file
 //
 //require_login();
 //admin_externalpage_setup('tooluploaduser');
-//require_capability('moodle/site:uploadusers', context_system::instance());
+require_capability('moodle/site:uploadusers', context_system::instance());
 
 // ==========================================================================================================
 // CONFIGURATION - The next three variables are the ones that need to be changed for your upload!
 // ==========================================================================================================
-$debug = true;
+
 // Change this if this file is named otherwise or moves somewhere else.
-$returnurl = new moodle_url('/admin/tool/' . basename(getcwd()) . '/autouploaduser.php');
+// $returnurl = new moodle_url('/admin/tool/' . basename(getcwd()) . '/autouploaduser.php');
+$returnurl = new moodle_url('/local/' . basename(getcwd()) . '/autouploaduser.php');
 
 // This is where the file location is set. Change location as needed.
 $options = getopt('f:', array('file:', 'help', 'debug'));
 
 // Display help.
 if (!(isset($options['file']) || isset($options['f'])) || isset($options['help']) || isset($options['h'])) {
-    fwrite(STDERR, 'AutoUploadUser v1.0 - by Michael Milette (https://www.tngconsulting.ca/) - June 2018' . PHP_EOL);
-    fwrite(STDERR, 'Purpose: Bulk Add/Update profile data from CSV file.' . PHP_EOL);
-    fwrite(STDERR, 'Example: php autouploaduser.php --file "filename.csv"' . PHP_EOL);
-    fwrite(STDERR, PHP_EOL);
-    fwrite(STDERR, 'Parameters:' . PHP_EOL);
-    fwrite(STDERR, PHP_EOL);
-    fwrite(STDERR, "--help|-h : (optional) Display's this information." . PHP_EOL);
-    fwrite(STDERR, PHP_EOL);
-    fwrite(STDERR, "--file|-f : (required) Specify the filename of a CSV file." . PHP_EOL);
-    fwrite(STDERR, PHP_EOL);
+    $help = 'AutoUploadUser v1.0 - by Michael Milette (https://www.tngconsulting.ca/) - June 2018' . PHP_EOL;
+    $help .= 'Purpose: Bulk Add/Update profile data from CSV file.' . PHP_EOL;
+    $help .= 'Example: php autouploaduser.php --file "filename.csv"' . PHP_EOL;
+    $help .= PHP_EOL;
+    $help .= 'Parameters:' . PHP_EOL;
+    $help .= PHP_EOL;
+    $help .= "--help|-h : (optional) Display's this information." . PHP_EOL;
+    $help .= PHP_EOL;
+    $help .= "--file|-f : (required) Specify the filename of a CSV file." . PHP_EOL;
+    fwrite(STDERR, $help . PHP_EOL);
     exit(1);
 }
+
+// Debug mode.
+$debug = isset($options['debug']);
 
 // Input CSV filename.
 $filename = empty($options['f']) ? '' : $options['f'];
@@ -98,7 +105,7 @@ $formdata->uupasswordnew = 1;                       // New user password: Create
 $formdata->uupasswordold = 0;                       // Existing user password: No change.
 $formdata->uuallowrenames = 0;                      // Allow renames: No.
 $formdata->uuallowdeletes = 0;                      // Allow deletes: No.
-$formdata->uuallowsuspends = 1;                     // Allow suspending of activating of accounts: Yes.
+$formdata->uuallowsuspends = 1;                     // Allow suspending of accounts: Yes.
 $formdata->uubulk = UU_BULK_NONE;                   // Select for bulk user actions: No.
 $formdata->uunoemailduplicates = 1;                 // Prevent email address duplicates: Yes.
 $formdata->uustandardusernames = 0;                 // Standardise usernames: No.
@@ -294,6 +301,9 @@ if (empty($iid)) {
 
     $validation = array();
     while ($line = $cir->next()) {
+        // Slow down the script to allow the site to be a little responsive.
+        usleep(2000);
+
         $upt->flush();
         $linenum++;
 
@@ -407,10 +417,10 @@ if (empty($iid)) {
 
             $remoteuser = true;
 
-            // Make sure there are no changes of existing fields except the suspended status.
+            // Make sure there are no changes of existing fields including the suspended status.
             foreach ((array)$existinguser as $k => $v) {
                 if ($k === 'suspended') {
-                    continue;
+                    // continue;
                 }
                 if (property_exists($user, $k)) {
                     $user->$k = $v;
@@ -1269,7 +1279,7 @@ if ($debug) {
 done:
 
 if (!empty($error_log)) {
-    $msg = 'There were errors processing the CSV file.' . PHP_EOL;
+    $msg = 'AutoUploadUser errors processing the CSV file.' . PHP_EOL;
     foreach($error_log as $error_message) {
         $msg .= $error_message . PHP_EOL;
     }
@@ -1480,34 +1490,3 @@ function uu_allowed_sysroles_cache2() {
     }
     return $rolecache;
 }
-
-
-// ================================================================================================
-// Sample example of a CSV data file.
-// ================================================================================================
-// username,firstname,lastname,institution,department,city,country,lang,auth,idnumber,icq,phone1,address,course1,group1
-// 09aalcorn,Andrew,Alcorn,NTHS,2009,Eaton,US,EN_US,oauth2,2015345,ACTIVE,5551212,4837 Nowhere Rd.,0012DT,ntB-3
-// 09aalcorn,Andrew,Alcorn,NTHS,2009,Eaton,US,EN_US,oauth2,2015345,ACTIVE,5551212,4837 Nowhere Rd.,2401JC,O1-35
-// 09aalcorn,Andrew,Alcorn,NTHS,2009,Eaton,US,EN_US,oauth2,2015345,ACTIVE,5551212,4837 Nowhere Rd.,9311JW,B3B-30
-// 09aalcorn,Andrew,Alcorn,NTHS,2009,Eaton,US,EN_US,oauth2,2015345,ACTIVE,5551212,4837 Nowhere Rd.,8401DT,O4-38
-// 09aalcorn,Andrew,Alcorn,NTHS,2009,Eaton,US,EN_US,oauth2,2015345,ACTIVE,5551212,4837 Nowhere Rd.,8303DT,O3B-29
-// 09aalcorn,Andrew,Alcorn,NTHS,2009,Eaton,US,EN_US,oauth2,2015345,ACTIVE,5551212,4837 Nowhere Rd.,8403JC,B2-32
-// 09aalcorn,Andrew,Alcorn,NTHS,2009,Eaton,US,EN_US,oauth2,2015345,ACTIVE,5551212,4837 Nowhere Rd.,0012DT,ntO-3
-// 09aalcorn,Andrew,Alcorn,NTHS,2009,Eaton,US,EN_US,oauth2,2015345,ACTIVE,5551212,4837 Nowhere Rd.,0101DA,B1-31
-// 09aalcorn,Andrew,Alcorn,NTHS,2009,Eaton,US,EN_US,oauth2,2015345,ACTIVE,5551212,4837 Nowhere Rd.,7302MA,B4-34
-// 09aalcorn,Andrew,Alcorn,NTHS,2009,Eaton,US,EN_US,oauth2,2015345,ACTIVE,5551212,4837 Nowhere Rd.,7403JB,O2-36
-// 10abauman,Anna,Bauman,NTHS,2009,West Alexandria,US,EN_US,oauth2,2178373,ACTIVE,5552222,260 Jessica Dr,2401JC,B3B-30
-// 10abauman,Anna,Bauman,NTHS,2009,West Alexandria,US,EN_US,oauth2,2178373,ACTIVE,5552222,260 Jessica Dr,7201LS,B1-31
-// 10abauman,Anna,Bauman,NTHS,2009,West Alexandria,US,EN_US,oauth2,2178373,ACTIVE,5552222,260 Jessica Dr,0012KE,ntO-1
-// 10abauman,Anna,Bauman,NTHS,2009,West Alexandria,US,EN_US,oauth2,2178373,ACTIVE,5552222,260 Jessica Dr,0012KE,ntB-1
-// 10abauman,Anna,Bauman,NTHS,2009,West Alexandria,US,EN_US,oauth2,2178373,ACTIVE,5552222,260 Jessica Dr,8401DT,B4-34
-// 10abauman,Anna,Bauman,NTHS,2009,West Alexandria,US,EN_US,oauth2,2178373,ACTIVE,5552222,260 Jessica Dr,8403JC,B2-32
-// 16jsmith,John,Smith,RHS,2016,Columbus,US,EN_US,oauth2,,,9375551212,210 North Street,9304EK,G01-22
-// 16jsmith,John,Smith,RHS,2016,Columbus,US,EN_US,oauth2,,,9375551212,210 North Street,8504DT,G02-22
-// 16jsmith,John,Smith,RHS,2016,Columbus,US,EN_US,oauth2,,,9375551212,210 North Street,0012DA,G03-22
-// 16jsmith,John,Smith,RHS,2016,Columbus,US,EN_US,oauth2,,,9375551212,210 North Street,SAOFFSH,
-// 16jsmith,John,Smith,RHS,2016,Columbus,US,EN_US,oauth2,,,9375551212,210 North Street,3403RV,G04-22
-// 16jsmith,John,Smith,RHS,2016,Columbus,US,EN_US,oauth2,,,9375551212,210 North Street,2502ME,G01-23
-// 16jsmith,John,Smith,RHS,2016,Columbus,US,EN_US,oauth2,,,9375551212,210 North Street,5502TA,G02-23
-// 16jsmith,John,Smith,RHS,2016,Columbus,US,EN_US,oauth2,,,9375551212,210 North Street,9225CM,G03-23
-// 16jsmith,John,Smith,RHS,2016,Columbus,US,EN_US,oauth2,,,9375551212,210 North Street,7404JB,G04-23
